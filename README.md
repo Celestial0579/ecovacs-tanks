@@ -3,8 +3,9 @@
 Home-Assistant-Integration, die Ecovacs-Modellprofile um Komponenten ergaenzt,
 die das mitgelieferte Profil verschweigt.
 
-Beim **DEEBOT T30 OMNI** sind das **Staubbeutel**, **Wischpads** und die
-**Pflegeeinheit** ("Andere Komponente" in der App).
+Beim **DEEBOT T30 OMNI** sind das drei Verbrauchsteile — **Staubbeutel**,
+**Wischpads** und **Pflegeeinheit** ("Andere Komponente" in der App) — sowie die
+komplette **Basisstation**: drei Tasten, Entleerungshaeufigkeit, Stationszustand.
 
 ## Das Problem
 
@@ -68,6 +69,38 @@ Geraet ausschliesslich als Fehlercode auf `sensor.<name>_fehler`:
 | 311, 312 | Staubbeutel wechseln bzw. voll |
 | 110, 114 | Staubbehaelter im Roboter fehlt bzw. voll |
 | 317 | Nachfuellen aus dem Frischwassertank gestoert |
+
+## Basisstation
+
+Das Profil hatte **gar keine** `station`-Faehigkeit — deshalb fehlten in HA die
+drei Tasten, die die Herstellerapp unter *Angedockt* zeigt. Ergaenzt:
+
+| | Entitaet | Stand beim Einbau |
+|---|---|---|
+| Staubbehaelter entleeren | `button` | — |
+| Mopp trocknen | `button` | — |
+| Basis reinigen | `button` | — |
+| Haeufigkeit der Auto-Entleerung | `select` | `smart` |
+| Zustand der Station | `sensor` | `idle` |
+
+Anders als bei den Verbrauchsteilen ist das **ungefaehrlich**: Stationsaktionen,
+`getAutoEmpty` und `getStationState` sind eigene Kommandos. Eine nicht
+unterstuetzte Aktion laesst nur sich selbst scheitern und reisst nichts mit.
+
+**Ungeprueft:** Die Auswahlwerte der Entleerung stehen auf `AUTO` und `SMART`.
+Ob das Geraet auch die Minutenwerte (10/15/25) annimmt, liesse sich nur durch
+Setzen herausfinden — das aendert das Verhalten des Geraets.
+
+## Was NICHT geht
+
+| | warum |
+|---|---|
+| Fuellstand der Wassertanks | kein Ereignis in `deebot-client`; die App zeigt nur zwei Tropfensymbole |
+| KI-Modus (`AI`-Knopf der App) | **kein einziges** KI-Kommando in der Bibliothek — App-/Cloud-Funktion |
+| Reinigungsgeschwindigkeit | `getEfficiency` gibt es, aber **Home Assistant** baut daraus keine Entitaet |
+
+Bei den letzten beiden liegt die Luecke nicht im Modellprofil, sondern eine
+Schicht hoeher. Eine Profilergaenzung liefe ins Leere.
 
 ## Wie es funktioniert
 
