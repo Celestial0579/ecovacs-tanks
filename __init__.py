@@ -26,6 +26,49 @@ Datei veraendert, und der Eingriff ueberlebt jedes Update von Home Assistant.
 
 Gemessener Befund (15.09.2026, T30 OMNI)
 ---------------------------------------
+Jede Komponente einzeln durchprobiert, je ein Neustart:
+
+    DUST_BAG           -> FUNKTIONIERT   Staubbeutel            26,13 %
+    ROUND_MOP          -> FUNKTIONIERT   Wischpads              82,07 %
+    UNIT_CARE          -> FUNKTIONIERT   "Andere Komponente"    60,44 %
+    CLEANING_SOLUTION  -> errno 500      ECOVACS Reinigungsloesung
+    SEWAGE_BOX         -> errno 500      Schmutzwasserbehaelter
+    WATER_SINK         -> errno 500      Frischwasserbehaelter
+
+Die drei funktionierenden decken sich mit der Herstellerapp unter "Wartung".
+Bezeichnend: Fuer Staubbeutel und Reinigungsloesung zeigt die App als einzige
+KEINE Reststunden an - trotzdem antwortet das Geraet auf dustBag, auf
+cleaningSolution jedoch nicht. Aus der App laesst sich also nicht ableiten,
+was die API hergibt; es hilft nur Ausprobieren.
+
+WICHTIGE FALLE: `getLifeSpan` fragt ALLE Komponenten in EINEM Aufruf ab. Ist
+auch nur eine nicht unterstuetzte dabei, weist das Geraet die GESAMTE Anfrage
+zurueck - dann stehen auch Buerste, Filter und Seitenbuerste auf `unknown`.
+Eine falsch eingetragene Komponente kostet also nicht nur sich selbst, sondern
+die funktionierenden gleich mit. Deshalb hier NUR eintragen, was nachweislich
+antwortet, und jede Ergaenzung EINZELN pruefen.
+
+Fuellstaende der Wassertanks gibt es nicht. Die Herstellerapp zeigt fuer Frisch-
+und Schmutzwasser nur zwei Tropfensymbole (voll/leer) - dafuer kennt
+deebot-client ueberhaupt kein Ereignis. Voll- und Leer-Zustaende meldet das
+Geraet nur als Fehlercode auf `sensor.<name>_fehler`: 301/322 Frischwasser leer,
+302/305/318/323 Schmutzwasser voll, 311/312 Staubbeutel, 110/114 Staubbehaelter
+im Roboter.
+
+Wie der Eingriff funktioniert
+-----------------------------
+`deebot_client.hardware.get_static_device_info()` fragt ZUERST einen
+Zwischenspeicher und importiert das Profilmodul nur, wenn dort nichts steht:
+
+    if device := _DEVICES.get(class_):
+        return device
+
+Diese Integration legt dort vorab ein erweitertes Profil ab. Die Bibliothek
+greift dann nie auf die Originaldatei zu - es wird also keine mitgelieferte
+Datei veraendert, und der Eingriff ueberlebt jedes Update von Home Assistant.
+
+Gemessener Befund (15.09.2026, T30 OMNI)
+---------------------------------------
 Einzeln durchprobiert, je ein Neustart:
 
     DUST_BAG     -> FUNKTIONIERT, lieferte 26,13 %
@@ -65,7 +108,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,8 +126,9 @@ DOMAIN = "ecovacs_tanks"
 # homeassistant.components.ecovacs.const.SUPPORTED_LIFESPANS stehen,
 # sonst baut HA keinen Sensor daraus.
 ERWEITERUNGEN: dict[str, tuple[str, ...]] = {
-    # T30 OMNI: SEWAGE_BOX und WATER_SINK am 15.09.2026 geprueft -> errno 500
-    "z4lvk7": ("DUST_BAG",),
+    # T30 OMNI: CLEANING_SOLUTION, SEWAGE_BOX, WATER_SINK am 15.09.2026
+    # geprueft -> Geraet antwortet errno 500
+    "z4lvk7": ("DUST_BAG", "ROUND_MOP", "UNIT_CARE"),
 }
 
 CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({}, extra=vol.ALLOW_EXTRA)}, extra=vol.ALLOW_EXTRA)
@@ -167,12 +212,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     # War die Ecovacs-Integration schneller, hat sie das alte Profil bereits
     # benutzt. Dann hilft nur ein Neuladen ihres Eintrags.
-    if neu_geladen:
+    #
+    # FALLE (15.09.2026): Das Neuladen hier direkt zu versuchen geht schief -
+    # zum Zeitpunkt von async_setup steht der Ecovacs-Eintrag oft noch nicht auf
+    # LOADED, die Schleife findet nichts und der Sensor fehlt still. Deshalb
+    # wird erst nach dem vollstaendigen Start neu geladen.
+    if not neu_geladen:
+        return True
+
+    async def _nachladen(_: Event) -> None:
         for eintrag in hass.config_entries.async_entries("ecovacs"):
             if eintrag.state is ConfigEntryState.LOADED:
-                _LOGGER.info("Lade Ecovacs-Eintrag %s neu", eintrag.title)
-                hass.async_create_task(
-                    hass.config_entries.async_reload(eintrag.entry_id)
+                _LOGGER.info(
+                    "Lade Ecovacs-Eintrag %s neu, damit das ergaenzte Profil greift",
+                    eintrag.title,
                 )
+                await hass.config_entries.async_reload(eintrag.entry_id)
 
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _nachladen)
     return True
