@@ -3,7 +3,8 @@
 Home-Assistant-Integration, die Ecovacs-Modellprofile um Komponenten ergaenzt,
 die das mitgelieferte Profil verschweigt.
 
-Beim **DEEBOT T30 OMNI** ist das der **Staubbeutel der Basisstation**.
+Beim **DEEBOT T30 OMNI** sind das **Staubbeutel**, **Wischpads** und die
+**Pflegeeinheit** ("Andere Komponente" in der App).
 
 ## Das Problem
 
@@ -18,13 +19,21 @@ sensoren laengst (`SUPPORTED_LIFESPANS`). Es bekommt sie nur nicht angeboten.
 
 ## Was gemessen wurde
 
-Jede Komponente einzeln durchprobiert, je ein HA-Neustart (15.09.2026):
+Jede Komponente **einzeln** durchprobiert, je ein HA-Neustart (15.09.2026):
 
-| Komponente | Ergebnis |
-|---|---|
-| `DUST_BAG` | **funktioniert**, lieferte 26,13 % |
-| `SEWAGE_BOX` | Geraet antwortet `{'ret': 'fail', 'errno': 500}` |
-| `WATER_SINK` | Geraet antwortet `{'ret': 'fail', 'errno': 500}` |
+| Komponente | App-Bezeichnung | Ergebnis |
+|---|---|---|
+| `DUST_BAG` | Staubbeutel | **funktioniert** — 26,13 % |
+| `ROUND_MOP` | Wischpads | **funktioniert** — 82,07 % |
+| `UNIT_CARE` | Andere Komponente | **funktioniert** — 60,44 % |
+| `CLEANING_SOLUTION` | ECOVACS Reinigungsloesung | `{'ret': 'fail', 'errno': 500}` |
+| `SEWAGE_BOX` | Schmutzwasserbehaelter | `{'ret': 'fail', 'errno': 500}` |
+| `WATER_SINK` | Frischwasserbehaelter | `{'ret': 'fail', 'errno': 500}` |
+
+Bezeichnend: Fuer **Staubbeutel und Reinigungsloesung** zeigt die Herstellerapp
+als einzige *keine* Reststunden an — trotzdem antwortet das Geraet auf
+`dustBag`, auf `cleaningSolution` jedoch nicht. Aus der App laesst sich also
+nicht ableiten, was die API hergibt. Es hilft nur Ausprobieren.
 
 ### Die Falle
 
@@ -35,13 +44,22 @@ Eine falsch eingetragene Komponente kostet also nicht nur sich selbst, sondern
 die funktionierenden gleich mit.
 
 Deshalb: **nur eintragen, was nachweislich antwortet**, und jede Ergaenzung
-einzeln pruefen.
+**einzeln** pruefen.
+
+### Zweite Falle: Reihenfolge beim Start
+
+Wird `ecovacs` **vor** dieser Integration eingerichtet, hat es das alte Profil
+schon benutzt. Ein Neuladen direkt in `async_setup` greift dann ins Leere — der
+Eintrag steht zu diesem Zeitpunkt oft noch nicht auf `LOADED`, die Schleife
+findet nichts, und die Sensoren fehlen **still**. Deshalb wird das Neuladen an
+`EVENT_HOMEASSISTANT_STARTED` gehaengt.
 
 ### Wassertanks
 
-Fuellstaende der Wassertanks gibt es an diesem Geraet nicht. Voll- und
-Leer-Zustaende meldet es ausschliesslich als Fehlercode auf
-`sensor.<name>_fehler`:
+Fuellstaende gibt es nicht. Die Herstellerapp zeigt fuer Frisch- und
+Schmutzwasser nur zwei Tropfensymbole (voll/leer) — dafuer kennt
+`deebot-client` ueberhaupt kein Ereignis. Voll- und Leer-Zustaende meldet das
+Geraet ausschliesslich als Fehlercode auf `sensor.<name>_fehler`:
 
 | Code | Bedeutung |
 |---|---|
