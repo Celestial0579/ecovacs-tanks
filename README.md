@@ -118,7 +118,23 @@ veraendert**, und der Eingriff ueberlebt jedes Update von Home Assistant.
 
 ## Einrichtung
 
-1. Ordner nach `config/custom_components/ecovacs_tanks/` kopieren
+### Ueber HACS
+
+1. In HACS unter *Eigene Repositorien* die Adresse dieses Repositoriums eintragen,
+   Art: **Integration**
+2. Herunterladen
+3. In `configuration.yaml` ergaenzen:
+
+```yaml
+ecovacs_tanks:
+```
+
+4. Home Assistant neu starten
+
+### Von Hand
+
+1. `custom_components/ecovacs_tanks/` aus diesem Repositorium nach
+   `config/custom_components/ecovacs_tanks/` kopieren
 2. In `configuration.yaml` ergaenzen:
 
 ```yaml
@@ -126,6 +142,10 @@ ecovacs_tanks:
 ```
 
 3. Home Assistant neu starten
+
+Die Integration haengt sich bewusst an `EVENT_HOMEASSISTANT_STARTED` und laedt den
+Ecovacs-Eintrag erst dann neu — beim Hochfahren ist er noch nicht geladen, und ein
+Neuladen zu frueh laesst die Sensoren als *nicht verfuegbar* stehen.
 
 ## Grenzen
 
