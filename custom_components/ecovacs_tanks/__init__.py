@@ -124,7 +124,7 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry, ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers.typing import ConfigType
@@ -210,7 +210,12 @@ def _station_bauen(aktionen: tuple[str, ...]):
     return station, [t.name for t in typen]
 
 
-def _erweitere(klasse: str, komponenten: tuple[str, ...], aktionen: tuple[str, ...]):
+def _erweitere(
+    klasse: str,
+    komponenten: tuple[str, ...],
+    aktionen: tuple[str, ...],
+    originale: dict[str, Any],
+):
     """Profil der Geraeteklasse erweitern und in den Zwischenspeicher legen.
 
     Rueckgabe: (erfolgreich, Meldung). Laeuft im Executor, nicht in der
@@ -265,6 +270,10 @@ def _erweitere(klasse: str, komponenten: tuple[str, ...], aktionen: tuple[str, .
     if not teile:
         return True, f"{klasse}: nichts zu ergaenzen, Profil ist bereits vollstaendig"
 
+    # Urzustand merken, BEVOR ueberschrieben wird. Fehlt der Schluessel noch,
+    # wird None gemerkt - dann muss das Entfernen den Eintrag loeschen, nicht
+    # etwas Falsches zurueckschreiben.
+    originale.setdefault(klasse, speicher.get(klasse))
     speicher[klasse] = dataclasses.replace(info, capabilities=caps)
     hinweis = (
         " (Profil war bereits aufgeloest - Ecovacs-Eintrag wird neu geladen)"
@@ -274,8 +283,62 @@ def _erweitere(klasse: str, komponenten: tuple[str, ...], aktionen: tuple[str, .
     return True, f"{klasse}: ergaenzt um {'; '.join(teile)}{hinweis}"
 
 
+
+
+def _zuruecksetzen(originale: dict[str, Any]) -> None:
+    """Profile in den Urzustand bringen. Laeuft im Executor."""
+    from deebot_client import hardware
+
+    speicher: dict[str, Any] | None = getattr(hardware, "_DEVICES", None)
+    if speicher is None or not isinstance(speicher, dict):
+        return
+    for klasse, urzustand in originale.items():
+        if urzustand is None:
+            speicher.pop(klasse, None)
+        else:
+            speicher[klasse] = urzustand
+
+
+async def _ecovacs_neu_laden(hass: HomeAssistant) -> None:
+    """Geladene Ecovacs-Eintraege neu laden, damit das Profil greift."""
+    for eintrag in hass.config_entries.async_entries("ecovacs"):
+        if eintrag.state is ConfigEntryState.LOADED:
+            _LOGGER.info(
+                "Lade Ecovacs-Eintrag %s neu, damit das geaenderte Profil greift",
+                eintrag.title,
+            )
+            await hass.config_entries.async_reload(eintrag.entry_id)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """YAML-Weg: den Eintrag einmalig aus `ecovacs_tanks:` uebernehmen.
+
+    Der YAML-Schluessel bleibt ausdruecklich erhalten - bestehende Anlagen
+    sollen durch die Umstellung auf den Einrichtungsdialog nicht stehen
+    bleiben. Er richtet jetzt nur noch den Eintrag ein; die eigentliche
+    Arbeit macht async_setup_entry.
+
+    `single_config_entry` im Manifest sorgt dafuer, dass daraus kein zweiter
+    Eintrag entsteht, wenn schon einer ueber die Oberflaeche angelegt wurde.
+    """
+    if DOMAIN not in config:
+        return True
+
+    hass.async_create_task(
+        hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": SOURCE_IMPORT}, data={}
+        )
+    )
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Profile erweitern, bevor die Ecovacs-Integration sie abruft."""
+    originale: dict[str, Any] = {}
+    # Neben den Urzustaenden wird auch der Abmelder des Start-Zuhoerers
+    # verwahrt - siehe die dritte Falle in async_unload_entry.
+    zustand: dict[str, Any] = {"originale": originale, "abmelden": None}
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = zustand
     neu_geladen = False
 
     klassen = set(ERWEITERUNGEN) | set(STATIONSAKTIONEN)
@@ -286,6 +349,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 klasse,
                 ERWEITERUNGEN.get(klasse, ()),
                 STATIONSAKTIONEN.get(klasse, ()),
+                originale,
             )
         except Exception:  # noqa: BLE001 - darf HA nicht mitreissen
             _LOGGER.exception(
@@ -301,24 +365,58 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         else:
             _LOGGER.warning("%s", meldung)
 
-    # War die Ecovacs-Integration schneller, hat sie das alte Profil bereits
-    # benutzt. Dann hilft nur ein Neuladen ihres Eintrags.
-    #
-    # FALLE (15.09.2026): Das Neuladen hier direkt zu versuchen geht schief -
-    # zum Zeitpunkt von async_setup steht der Ecovacs-Eintrag oft noch nicht auf
-    # LOADED, die Schleife findet nichts und der Sensor fehlt still. Deshalb
-    # wird erst nach dem vollstaendigen Start neu geladen.
     if not neu_geladen:
         return True
 
-    async def _nachladen(_: Event) -> None:
-        for eintrag in hass.config_entries.async_entries("ecovacs"):
-            if eintrag.state is ConfigEntryState.LOADED:
-                _LOGGER.info(
-                    "Lade Ecovacs-Eintrag %s neu, damit das ergaenzte Profil greift",
-                    eintrag.title,
-                )
-                await hass.config_entries.async_reload(eintrag.entry_id)
+    # War die Ecovacs-Integration schneller, hat sie das alte Profil bereits
+    # benutzt. Dann hilft nur ein Neuladen ihres Eintrags.
+    #
+    # FALLE (15.09.2026): Das Neuladen waehrend des Starts direkt zu versuchen
+    # geht schief - der Ecovacs-Eintrag steht dann oft noch nicht auf LOADED,
+    # die Schleife findet nichts und der Sensor fehlt still.
+    #
+    # ZWEITE FALLE (20.09.2026, mit dem Einrichtungsdialog dazugekommen): Wird
+    # die Integration zur LAUFZEIT hinzugefuegt, ist der Start laengst vorbei -
+    # EVENT_HOMEASSISTANT_STARTED kommt nie wieder. Wer nur auf das Ereignis
+    # wartet, sieht die neuen Sensoren erst nach dem naechsten Neustart.
+    # Deshalb die Fallunterscheidung.
+    if hass.is_running:
+        await _ecovacs_neu_laden(hass)
+    else:
+        async def _nachladen(_: Event) -> None:
+            zustand["abmelden"] = None
+            await _ecovacs_neu_laden(hass)
 
-    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _nachladen)
+        zustand["abmelden"] = hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, _nachladen
+        )
+
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Profile zuruecksetzen und Ecovacs neu laden.
+
+    Ohne das bliebe die Erweiterung bis zum naechsten Neustart wirksam,
+    obwohl sie in der Oberflaeche schon entfernt ist - ein Zustand, der
+    niemandem erklaerbar waere.
+    """
+    zustand = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if not zustand:
+        return True
+
+    # DRITTE FALLE (20.09.2026): Wird der Eintrag entfernt, BEVOR Home Assistant
+    # fertig hochgefahren ist, bleibt der Zuhoerer auf
+    # EVENT_HOMEASSISTANT_STARTED sonst haengen. Er wuerde dann nach dem Start
+    # die Ecovacs-Integration neu laden, obwohl diese Erweiterung schon weg ist
+    # - ein Neuladen ohne erkennbaren Anlass.
+    if (abmelden := zustand.get("abmelden")) is not None:
+        abmelden()
+
+    originale = zustand.get("originale") or {}
+    if not originale:
+        return True
+
+    await hass.async_add_executor_job(_zuruecksetzen, originale)
+    await _ecovacs_neu_laden(hass)
     return True

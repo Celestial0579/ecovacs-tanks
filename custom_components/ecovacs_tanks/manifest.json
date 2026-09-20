@@ -1,10 +1,14 @@
 {
   "domain": "ecovacs_tanks",
   "name": "Ecovacs: Tank- und Beutelstaende",
-  "version": "1.0.0",
+  "config_flow": true,
+  "single_config_entry": true,
+  "version": "1.1.0",
   "documentation": "https://git.firestrike.de/tim.heyne/ecovacs-tanks",
   "issue_tracker": "https://git.firestrike.de/tim.heyne/ecovacs-tanks/issues",
-  "codeowners": ["@tim.heyne"],
+  "codeowners": [
+    "@tim.heyne"
+  ],
   "dependencies": [],
   "requirements": [],
   "iot_class": "cloud_push"
