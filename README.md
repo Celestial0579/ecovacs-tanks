@@ -118,34 +118,62 @@ veraendert**, und der Eingriff ueberlebt jedes Update von Home Assistant.
 
 ## Einrichtung
 
-### Ueber HACS
+Seit Fassung 1.1.0 laeuft die Einrichtung ueber die Oberflaeche — **ohne**
+Eingriff in `configuration.yaml`.
 
-1. In HACS unter *Eigene Repositorien* die Adresse dieses Repositoriums eintragen,
-   Art: **Integration**
-2. Herunterladen
-3. In `configuration.yaml` ergaenzen:
+### Ueber HACS (empfohlen)
 
-```yaml
-ecovacs_tanks:
-```
+1. In HACS unter *Eigene Repositorien* die Adresse dieses Repositoriums
+   eintragen, Art: **Integration**
+2. Herunterladen, Home Assistant neu starten
+3. *Einstellungen → Geraete & Dienste → Integration hinzufuegen* →
+   **Ecovacs: Tank- und Beutelstaende** → bestaetigen
 
-4. Home Assistant neu starten
+Es gibt nichts einzustellen. Der Dialog besteht aus einer Bestaetigung; die
+Erweiterung ergaenzt fest hinterlegte Profile.
 
 ### Von Hand
 
-1. `custom_components/ecovacs_tanks/` aus diesem Repositorium nach
-   `config/custom_components/ecovacs_tanks/` kopieren
-2. In `configuration.yaml` ergaenzen:
+1. `custom_components/ecovacs_tanks/` nach `config/custom_components/`
+   kopieren, Home Assistant neu starten
+2. Integration wie oben hinzufuegen
 
-```yaml
-ecovacs_tanks:
-```
+### Warum ueberhaupt ein Dialog
 
-3. Home Assistant neu starten
+Bis 1.0.0 liess sich die Erweiterung **nur** ueber `ecovacs_tanks:` in der
+`configuration.yaml` scharf schalten. Auf einer HAOS-Anlage ohne Terminal-,
+Datei-Editor- oder SSH-Add-on kommt man an diese Datei jedoch gar nicht heran:
+Die Erweiterung war dort per HACS installierbar, aber **nicht aktivierbar**.
+Genau dieser Fall trat am 20.09.2026 an einem zweiten Standort auf.
 
-Die Integration haengt sich bewusst an `EVENT_HOMEASSISTANT_STARTED` und laedt den
-Ecovacs-Eintrag erst dann neu — beim Hochfahren ist er noch nicht geladen, und ein
-Neuladen zu frueh laesst die Sensoren als *nicht verfuegbar* stehen.
+### Bestandsanlagen
+
+Der YAML-Schluessel bleibt erhalten und funktioniert weiter. Beim ersten Start
+nach dem Update legt er den Eintrag selbsttaetig an — es ist **nichts zu tun**,
+und die Zeile darf stehen bleiben. `single_config_entry` verhindert, dass
+daraus ein zweiter Eintrag entsteht.
+
+### Zeitpunkt des Neuladens
+
+Beim Hochfahren haengt sich die Integration an `EVENT_HOMEASSISTANT_STARTED`
+und laedt den Ecovacs-Eintrag erst dann neu — zu frueh laesst die Sensoren als
+*nicht verfuegbar* stehen.
+
+Wird sie dagegen **zur Laufzeit** hinzugefuegt, ist dieses Ereignis laengst
+vorbei und kaeme nie wieder. Dann wird sofort neu geladen. Ohne diese
+Unterscheidung erschienen die neuen Sensoren erst nach dem naechsten Neustart.
+
+### Entfernen
+
+Beim Entfernen des Eintrags werden die Profile in den Urzustand gebracht und
+der Ecovacs-Eintrag neu geladen. Die Zusatzsensoren verschwinden also sofort
+und nicht erst beim naechsten Neustart.
+
+**Steht `ecovacs_tanks:` noch in der `configuration.yaml`, kommt der Eintrag
+beim naechsten Start von selbst wieder.** Das ist bei YAML-konfigurierten
+Integrationen so vorgesehen und kein Fehler — wer die Erweiterung dauerhaft
+loswerden will, muss die Zeile mit entfernen. Anlagen, die ueber die
+Oberflaeche eingerichtet wurden, haben diese Zeile ohnehin nicht.
 
 ## Grenzen
 
