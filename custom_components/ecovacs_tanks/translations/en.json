@@ -5,9 +5,6 @@
         "title": "Ecovacs: tank and bag levels",
         "description": "Extends the device profiles with dust bag, mop pads and care unit, plus the station buttons. There is nothing to configure — confirm to set it up."
       }
-    },
-    "abort": {
-      "single_instance_allowed": "The extension is already set up. A second entry would have no effect."
     }
   }
 }

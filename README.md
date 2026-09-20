@@ -175,6 +175,11 @@ Integrationen so vorgesehen und kein Fehler — wer die Erweiterung dauerhaft
 loswerden will, muss die Zeile mit entfernen. Anlagen, die ueber die
 Oberflaeche eingerichtet wurden, haben diese Zeile ohnehin nicht.
 
+Kommt man an die Datei nicht heran — genau der Fall, fuer den es den Dialog
+gibt —, hilft **Deaktivieren statt Loeschen**: `single_config_entry` zaehlt
+auch deaktivierte Eintraege mit, der Import-Flow bricht deshalb ab und die
+Erweiterung bleibt aus. Nachgeprueft gegen Home Assistant 2026.9.3.
+
 ## Grenzen
 
 `_DEVICES` ist ein privater Name. Wird er in einer kuenftigen Fassung von

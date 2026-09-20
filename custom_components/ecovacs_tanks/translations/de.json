@@ -5,9 +5,6 @@
         "title": "Ecovacs: Tank- und Beutelstaende",
         "description": "Ergaenzt die Geraeteprofile um Staubbeutel, Wischpads und Pflegeeinheit sowie die Stationstasten. Es gibt nichts einzustellen — zum Einrichten bestaetigen."
       }
-    },
-    "abort": {
-      "single_instance_allowed": "Die Erweiterung ist bereits eingerichtet. Ein zweiter Eintrag waere wirkungslos."
     }
   }
 }
