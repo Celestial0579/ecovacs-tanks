@@ -1,15 +1,15 @@
 {
   "domain": "ecovacs_tanks",
   "name": "Ecovacs: Tank- und Beutelstaende",
-  "config_flow": true,
-  "single_config_entry": true,
-  "version": "1.1.0",
-  "documentation": "https://github.com/Celestial0579/ecovacs-tanks",
-  "issue_tracker": "https://github.com/Celestial0579/ecovacs-tanks/issues",
   "codeowners": [
-    "@tim.heyne"
+    "@Celestial0579"
   ],
+  "config_flow": true,
   "dependencies": [],
+  "documentation": "https://github.com/Celestial0579/ecovacs-tanks",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/Celestial0579/ecovacs-tanks/issues",
   "requirements": [],
-  "iot_class": "cloud_push"
+  "single_config_entry": true,
+  "version": "1.1.0"
 }
