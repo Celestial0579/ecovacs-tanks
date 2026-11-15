@@ -55,6 +55,19 @@ Eintrag steht zu diesem Zeitpunkt oft noch nicht auf `LOADED`, die Schleife
 findet nichts, und die Sensoren fehlen **still**. Deshalb wird das Neuladen an
 `EVENT_HOMEASSISTANT_STARTED` gehaengt.
 
+### Dritte Falle: Wettlauf beim Start
+
+`deebot-client` liest den Zwischenspeicher, importiert das Profil in einem Thread
+und schreibt es **erst danach** hinein. Laeuft das zeitgleich mit dieser
+Integration, ueberschreibt Ecovacs das erweiterte Profil mit dem Original. Seit
+1.1.1 wird deshalb nach dem Start nachgesehen: Liegt nicht mehr das erweiterte
+Profil im Zwischenspeicher, wird es erneut eingesetzt und Ecovacs neu geladen.
+
+### Mindestfassung
+
+Home Assistant **2025.11** oder neuer. Erst ab dieser Fassung bringt Home
+Assistant `deebot-client` 16 mit, dessen Zwischenspeicher hier genutzt wird.
+
 ### Wassertanks
 
 Fuellstaende gibt es nicht. Die Herstellerapp zeigt fuer Frisch- und

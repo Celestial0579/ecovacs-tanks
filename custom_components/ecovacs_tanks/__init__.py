@@ -72,37 +72,6 @@ Geraet nur als Fehlercode auf `sensor.<name>_fehler`: 301/322 Frischwasser leer,
 302/305/318/323 Schmutzwasser voll, 311/312 Staubbeutel, 110/114 Staubbehaelter
 im Roboter.
 
-Wie der Eingriff funktioniert
------------------------------
-`deebot_client.hardware.get_static_device_info()` fragt ZUERST einen
-Zwischenspeicher und importiert das Profilmodul nur, wenn dort nichts steht:
-
-    if device := _DEVICES.get(class_):
-        return device
-
-Diese Integration legt dort vorab ein erweitertes Profil ab. Die Bibliothek
-greift dann nie auf die Originaldatei zu - es wird also keine mitgelieferte
-Datei veraendert, und der Eingriff ueberlebt jedes Update von Home Assistant.
-
-Gemessener Befund (15.09.2026, T30 OMNI)
----------------------------------------
-Einzeln durchprobiert, je ein Neustart:
-
-    DUST_BAG     -> FUNKTIONIERT, lieferte 26,13 %
-    SEWAGE_BOX   -> Geraet antwortet {'ret': 'fail', 'errno': 500}
-    WATER_SINK   -> Geraet antwortet {'ret': 'fail', 'errno': 500}
-
-WICHTIGE FALLE: `getLifeSpan` fragt ALLE Komponenten in EINEM Aufruf ab. Ist
-auch nur eine nicht unterstuetzte dabei, weist das Geraet die GESAMTE Anfrage
-zurueck - dann stehen auch Buerste, Filter und Seitenbuerste auf `unknown`.
-Eine nicht unterstuetzte Komponente kostet also nicht nur sich selbst, sondern
-die funktionierenden gleich mit.
-
-Fuellstaende der Wassertanks gibt es an diesem Geraet folglich nicht. Voll- und
-Leer-Zustaende meldet es ausschliesslich als Fehlercode auf
-`sensor.<name>_fehler`: 301/322 Frischwasser leer, 302/305/318/323 Schmutzwasser
-voll, 311/312 Staubbeutel, 110/114 Staubbehaelter im Roboter.
-
 Grenzen
 -------
 `_DEVICES` ist ein privater Name. Wird er in einer kuenftigen Fassung von
@@ -215,10 +184,11 @@ def _erweitere(
     komponenten: tuple[str, ...],
     aktionen: tuple[str, ...],
     originale: dict[str, Any],
+    erweitert: dict[str, Any],
 ):
     """Profil der Geraeteklasse erweitern und in den Zwischenspeicher legen.
 
-    Rueckgabe: (erfolgreich, Meldung). Laeuft im Executor, nicht in der
+    Rueckgabe: (erfolgreich, Meldung, Ecovacs neu laden). Laeuft im Executor, nicht in der
     Ereignisschleife - importlib.import_module blockiert.
     """
     from deebot_client import hardware
@@ -230,7 +200,7 @@ def _erweitere(
         return False, (
             "deebot_client.hardware._DEVICES nicht gefunden - die Bibliothek hat sich "
             "geaendert. Die zusaetzlichen Sensoren und Stationstasten bleiben aus."
-        )
+        ), False
 
     schon_aufgeloest = klasse in speicher
 
@@ -268,19 +238,40 @@ def _erweitere(
             teile.append("Station " + ", ".join(namen) + " samt Entleerung und Zustand")
 
     if not teile:
-        return True, f"{klasse}: nichts zu ergaenzen, Profil ist bereits vollstaendig"
+        return True, f"{klasse}: nichts zu ergaenzen, Profil ist bereits vollstaendig", False
 
     # Urzustand merken, BEVOR ueberschrieben wird. Fehlt der Schluessel noch,
     # wird None gemerkt - dann muss das Entfernen den Eintrag loeschen, nicht
     # etwas Falsches zurueckschreiben.
     originale.setdefault(klasse, speicher.get(klasse))
-    speicher[klasse] = dataclasses.replace(info, capabilities=caps)
+    speicher[klasse] = erweitert[klasse] = dataclasses.replace(info, capabilities=caps)
     hinweis = (
         " (Profil war bereits aufgeloest - Ecovacs-Eintrag wird neu geladen)"
         if schon_aufgeloest
         else ""
     )
-    return True, f"{klasse}: ergaenzt um {'; '.join(teile)}{hinweis}"
+    return True, f"{klasse}: ergaenzt um {'; '.join(teile)}{hinweis}", schon_aufgeloest
+
+
+def _wiederherstellen(erweitert: dict[str, Any]) -> list[str]:
+    """Erweiterte Profile wieder einsetzen, falls sie ueberschrieben wurden. Laeuft im Executor.
+
+    FALLE (13.11.2026): get_static_device_info() liest den Zwischenspeicher, importiert das
+    Profilmodul in einem Thread und schreibt ERST DANACH. Lief das beim Start parallel zu
+    _erweitere, ueberschreibt Ecovacs das erweiterte Profil mit dem Original, und die
+    Zusatzsensoren fehlen still bis zum naechsten Neustart.
+    """
+    from deebot_client import hardware
+
+    speicher: dict[str, Any] | None = getattr(hardware, "_DEVICES", None)
+    if not isinstance(speicher, dict):
+        return []
+    verloren = []
+    for klasse, profil in erweitert.items():
+        if speicher.get(klasse) is not profil:
+            speicher[klasse] = profil
+            verloren.append(klasse)
+    return verloren
 
 
 
@@ -335,8 +326,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Profile erweitern, bevor die Ecovacs-Integration sie abruft."""
     originale: dict[str, Any] = {}
+    erweitert: dict[str, Any] = {}
     # Neben den Urzustaenden wird auch der Abmelder des Start-Zuhoerers
-    # verwahrt - siehe die dritte Falle in async_unload_entry.
+    # verwahrt - siehe die vierte Falle in async_unload_entry.
     zustand: dict[str, Any] = {"originale": originale, "abmelden": None}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = zustand
     neu_geladen = False
@@ -344,12 +336,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     klassen = set(ERWEITERUNGEN) | set(STATIONSAKTIONEN)
     for klasse in sorted(klassen):
         try:
-            ok, meldung = await hass.async_add_executor_job(
+            ok, meldung, neu_laden = await hass.async_add_executor_job(
                 _erweitere,
                 klasse,
                 ERWEITERUNGEN.get(klasse, ()),
                 STATIONSAKTIONEN.get(klasse, ()),
                 originale,
+                erweitert,
             )
         except Exception:  # noqa: BLE001 - darf HA nicht mitreissen
             _LOGGER.exception(
@@ -360,13 +353,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if ok:
             _LOGGER.info("%s", meldung)
-            if "neu geladen" in meldung:
-                neu_geladen = True
+            neu_geladen = neu_geladen or neu_laden
         else:
             _LOGGER.warning("%s", meldung)
 
-    if not neu_geladen:
+    if not erweitert:
         return True
+
+    async def _pruefen_und_laden(laden: bool) -> None:
+        verloren = await hass.async_add_executor_job(_wiederherstellen, erweitert)
+        if verloren:
+            _LOGGER.warning(
+                "Profil %s wurde beim Start ueberschrieben - erneut ergaenzt, Ecovacs wird neu geladen",
+                ", ".join(verloren),
+            )
+        if laden or verloren:
+            await _ecovacs_neu_laden(hass)
 
     # War die Ecovacs-Integration schneller, hat sie das alte Profil bereits
     # benutzt. Dann hilft nur ein Neuladen ihres Eintrags.
@@ -380,12 +382,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # EVENT_HOMEASSISTANT_STARTED kommt nie wieder. Wer nur auf das Ereignis
     # wartet, sieht die neuen Sensoren erst nach dem naechsten Neustart.
     # Deshalb die Fallunterscheidung.
+    #
+    # DRITTE FALLE (13.11.2026): siehe _wiederherstellen. Deshalb wird nach dem Start
+    # auch dann nachgesehen, wenn kein Neuladen vorgesehen war.
     if hass.is_running:
-        await _ecovacs_neu_laden(hass)
+        await _pruefen_und_laden(neu_geladen)
     else:
         async def _nachladen(_: Event) -> None:
             zustand["abmelden"] = None
-            await _ecovacs_neu_laden(hass)
+            await _pruefen_und_laden(neu_geladen)
 
         zustand["abmelden"] = hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STARTED, _nachladen
@@ -405,7 +410,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not zustand:
         return True
 
-    # DRITTE FALLE (20.09.2026): Wird der Eintrag entfernt, BEVOR Home Assistant
+    # VIERTE FALLE (20.09.2026): Wird der Eintrag entfernt, BEVOR Home Assistant
     # fertig hochgefahren ist, bleibt der Zuhoerer auf
     # EVENT_HOMEASSISTANT_STARTED sonst haengen. Er wuerde dann nach dem Start
     # die Ecovacs-Integration neu laden, obwohl diese Erweiterung schon weg ist

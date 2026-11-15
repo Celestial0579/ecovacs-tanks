@@ -1,15 +1,14 @@
 {
   "domain": "ecovacs_tanks",
   "name": "Ecovacs: Tank- und Beutelstaende",
-  "codeowners": [
-    "@Celestial0579"
-  ],
+  "categories": ["appliances_cleaning.cleaning"],
+  "codeowners": ["@Celestial0579"],
   "config_flow": true,
-  "dependencies": [],
   "documentation": "https://github.com/Celestial0579/ecovacs-tanks",
+  "integration_type": "service",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/Celestial0579/ecovacs-tanks/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.1.0"
+  "version": "1.1.1"
 }
